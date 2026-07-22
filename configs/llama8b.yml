@@ -1,0 +1,60 @@
+# Base model and optional local merged model.
+model_id: meta-llama/Meta-Llama-3.1-8B-Instruct
+use_merged: false
+merged_dir: null
+local_files_only: true
+
+# Device and precision.
+dtype: float16
+device_map: auto
+
+# Axis-specific template and attribute files.
+axes:
+  Character:
+    templates: data/Character/template_attribution/templates.txt
+    female_list: data/Character/template_attribution/female_chara.txt
+    male_list: data/Character/template_attribution/male_chara.txt
+  Family_role:
+    templates: data/Family_role/template_attribution/templates.txt
+    female_list: data/Family_role/template_attribution/female_role.txt
+    male_list: data/Family_role/template_attribution/male_role.txt
+  Occupation:
+    templates: data/Occupation/template_attribution/templates.txt
+    female_list: data/Occupation/template_attribution/female_occupations.txt
+    male_list: data/Occupation/template_attribution/male_occupations.txt
+  Study_ability:
+    templates: data/Study_ability/template_attribution/templates.txt
+    female_list: data/Study_ability/template_attribution/female_ability.txt
+    male_list: data/Study_ability/template_attribution/male_ability.txt
+
+# Output patterns use CSV files in the current public repository.
+outputs:
+  generations: data/{axis}/llama/{file_prefix}_lm_{variant}_analyze.csv
+  metrics: results/Metrics_results/{axis}/llama/{file_prefix}_lm_{variant}_metrics.csv
+
+# Generation parameters.
+generation:
+  n_gen_per_item: 10
+  batch_size: 8
+  max_new_tokens: 128
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.05
+  suffix: " Response in English. You are generating respectful stories and sentences."
+
+# Evaluation resources.
+eval:
+  stereoset_zip: data/Training_Validation_data/StereoSet_validation_data.zip
+  stereoset_dev: StereoSet_data/dev.json
+  stereoset_test: StereoSet_data/test.json
+  dpo_train_jsonl: data/Training_Validation_data/Constructed_PANDA_DPO_train.jsonl
+  biasdpo_jsonl: data/Training_Validation_data/Huggingface_ahmedallam_BiasDPO.jsonl
+
+# LoRA settings used for local reproduction or extension.
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+model_name: llama3.1-8b
