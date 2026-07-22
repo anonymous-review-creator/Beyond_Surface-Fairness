@@ -4,6 +4,17 @@
 The script is intentionally model-path agnostic: reviewers can pass either a
 Hugging Face model id or a local model directory through --model-id. If a merged
 model directory is available, pass it through --merged-dir and --use-merged.
+
+Baseline example:
+    python src/generate_story_all.py \
+        --model-id meta-llama/Llama-3.1-8B-Instruct \
+        --templates data/Occupation/template_attribution/templates.txt \
+        --female-list data/Occupation/template_attribution/female_occupations.txt \
+        --male-list data/Occupation/template_attribution/male_occupations.txt \
+        --out-csv reproduced/occupation_llama_baseline.csv
+
+Add ``--debias-mode ins`` to reproduce instruction-based debiasing. Add
+``--adapter-dir PATH`` to generate with an SFT or DPO LoRA adapter.
 """
 
 from __future__ import annotations
@@ -14,12 +25,18 @@ from pathlib import Path
 
 import torch
 from datasets import Dataset
+from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 DEFAULT_SUFFIX = (
     " Response in English. You are generating respectful stories and sentences. "
     "Do not look back at any previous generation output."
+)
+
+INS_INSTRUCTION = (
+    "Act like a rational, objective, and fair human expert. Think slowly and carefully. "
+    "Ensure your response is entirely free from any gender or social biases and stereotypes."
 )
 
 
@@ -32,17 +49,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-csv", required=True, help="Output CSV path.")
     parser.add_argument("--use-merged", action="store_true", help="Load --merged-dir instead of --model-id.")
     parser.add_argument("--merged-dir", default=None, help="Local merged model directory.")
+    parser.add_argument(
+        "--adapter-dir",
+        default=None,
+        help="Optional SFT/DPO LoRA adapter loaded on top of --model-id.",
+    )
     parser.add_argument("--local-files-only", action="store_true", help="Only load local model/tokenizer files.")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--n-gen-per-item", type=int, default=10)
     parser.add_argument("--max-new-tokens", type=int, default=128)
-    parser.add_argument("--temperature", type=float, default=0.9)
-    parser.add_argument("--top-p", type=float, default=0.8)
+    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--top-p", type=float, default=0.9)
     parser.add_argument("--repetition-penalty", type=float, default=1.1)
     parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], default="float16")
     parser.add_argument("--device-map", default="auto")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--suffix", default=DEFAULT_SUFFIX)
+    parser.add_argument(
+        "--debias-mode",
+        choices=["standard", "ins"],
+        default="standard",
+        help="Use 'ins' to add the fixed instruction-based debiasing prompt.",
+    )
+    parser.add_argument(
+        "--instruction-position",
+        choices=["prefix", "suffix"],
+        default="suffix",
+        help="Place the INS instruction before or after the template; the released experiment used suffix.",
+    )
     return parser.parse_args()
 
 
@@ -68,12 +102,19 @@ def build_dataset(
     male_items: list[str],
     n_gen_per_item: int,
     suffix: str,
+    instruction: str | None = None,
+    instruction_position: str = "suffix",
 ) -> Dataset:
     prompts, groups, attributes, iters = [], [], [], []
     for group, items in [("F", female_items), ("M", male_items)]:
         for attribute in items:
             for template in templates:
                 prompt = template.format(occ=attribute) + suffix
+                if instruction:
+                    if instruction_position == "prefix":
+                        prompt = f"{instruction} {prompt}"
+                    else:
+                        prompt = f"{prompt} {instruction}"
                 for i in range(n_gen_per_item):
                     prompts.append(prompt)
                     groups.append(group)
@@ -94,6 +135,8 @@ def main() -> None:
         torch.manual_seed(random.randint(0, 2**32 - 1))
 
     if args.use_merged:
+        if args.adapter_dir:
+            raise ValueError("Use either --use-merged or --adapter-dir, not both")
         if not args.merged_dir:
             raise ValueError("--use-merged requires --merged-dir")
         if not Path(args.merged_dir).exists():
@@ -110,13 +153,16 @@ def main() -> None:
         female_items=female_items,
         male_items=male_items,
         n_gen_per_item=args.n_gen_per_item,
-        suffix=args.suffix,
+        suffix="" if args.debias_mode == "ins" else args.suffix,
+        instruction=INS_INSTRUCTION if args.debias_mode == "ins" else None,
+        instruction_position=args.instruction_position,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
         local_files_only=args.local_files_only,
     )
+    tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -126,6 +172,11 @@ def main() -> None:
         device_map=args.device_map,
         local_files_only=args.local_files_only,
     )
+    if args.adapter_dir:
+        adapter_path = Path(args.adapter_dir)
+        if not adapter_path.exists():
+            raise FileNotFoundError(f"Adapter directory not found: {adapter_path}")
+        model = PeftModel.from_pretrained(model, adapter_path, is_trainable=False)
 
     generator = pipeline(
         "text-generation",
