@@ -330,3 +330,9 @@ This repository is intended for anonymous review and research replication. Befor
 - the repository URL, account name, and branch names do not identify the authors or institution.
 
 For a clean anonymous release, create a new repository from a sanitized working directory rather than reusing a repository with non-anonymous history.
+
+## License
+
+Original code in this repository is licensed under the Apache License 2.0.
+Third-party datasets remain subject to the licenses identified in
+`THIRD_PARTY_NOTICES.md` and the corresponding files under `licenses/`.
