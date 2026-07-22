@@ -1,3 +1,15 @@
-.Rhistory
 __pycache__/
-*.pyc
+*.py[cod]
+.Rhistory
+.RData
+
+# Local experiment outputs and model artifacts
+runs/
+wandb/
+**/checkpoint-*/
+*.safetensors
+pytorch_model*.bin
+training_args.bin
+optimizer.pt
+scheduler.pt
+rng_state.pth

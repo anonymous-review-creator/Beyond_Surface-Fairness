@@ -33,6 +33,7 @@ The workflow is organized around five stages:
 |   |-- Family_role/
 |   |-- Occupation/
 |   |-- Study_ability/
+|   |-- Identity_lexicon/
 |   `-- Training_Validation_data/
 |      `-- StereoSet_validation_data.zip
 |-- results/
@@ -42,13 +43,17 @@ The workflow is organized around five stages:
 |   `-- cross_validation.csv
 |-- src/
 |   |-- analyze_metrics.py
+|   |-- dataloader.py
 |   |-- evaluation.py
 |   |-- generate_story_all.py
+|   |-- train_sft_lora.py
+|   |-- train_dpo_lora.py
 |   |-- stereoset_test.py
 |   `-- Visualization/
 |       |-- Vis_FS.R
 |       `-- Vis_SHR.R
 |-- environment.yml
+|-- REPRODUCIBILITY.md
 `-- README.md
 ```
 
@@ -155,22 +160,9 @@ StereoSet_data/test.json
 StereoSet_data/test_terms.txt
 ```
 
-### Third-Party Data Licenses
-
-The third-party datasets in this directory retain their original licenses:
-
-- StereoSet material in `StereoSet_validation_data.zip`: CC BY-SA 4.0.
-- PANDA-derived material in `Constructed_PANDA_DPO_train.jsonl`: MIT License.
-- BiasDPO material in `Huggingface_ahmedallam_BiasDPO.jsonl`: Apache License 2.0.
-
-See `THIRD_PARTY_NOTICES.md` and the files under `licenses/` for source links,
-attribution, license scope, and license terms. These third-party licenses apply
-only to the identified third-party materials and do not assign a license to the
-repository's original code, generated outputs, or analysis artifacts.
-
 Large external datasets used in the study may need to be downloaded separately from their original sources, as described in the paper.
 
-The scripts `src/evaluation.py` and `src/stereoset_test.py` expect the official StereoSet data-loading utilities. If `dataloader.py` is not present in this repository, obtain it from the official StereoSet evaluation code and place it where Python can import it.
+The official StereoSet data loader is included as `src/dataloader.py`. It is an unchanged copy of the upstream file at commit `ead7d086a64a192a1eca88e0dd2fd163de375218` from `https://github.com/moinnadeem/StereoSet`, which is distributed under CC BY-SA 4.0.
 
 ## Results Directory
 
@@ -236,11 +228,32 @@ These JSON files contain StereoSet benchmark results for baseline and debiased v
 
 `src/generate_story_all.py`
 
-: Generates model outputs from prompt templates and attribute lists. The script accepts model, template, attribute-list, and output paths as command-line arguments.
+: Generates baseline, adapter-based, merged-model, and instruction-debiased
+outputs from prompt templates and attribute lists. INS is implemented through
+the `--debias-mode ins` switch in this shared script rather than a duplicated
+generation program. Runnable baseline, INS, and adapter examples are included
+in the script header.
+
+`src/train_sft_lora.py`
+
+: Trains a LoRA-SFT adapter on preferred PANDA counterfactual responses. One
+parameterized script supports both model families and selects the reported
+model-specific LoRA settings automatically. A runnable example is included in
+the script header.
+
+`src/train_dpo_lora.py`
+
+: Trains a LoRA-DPO adapter from PANDA-derived and BiasDPO preference pairs
+using the 4:1 per-batch mixture described in the paper. Model-specific defaults
+and a runnable example are documented in the script header.
 
 `src/analyze_metrics.py`
 
 : Annotates generated stories, counts female/male/unknown signals, aggregates results, and computes metrics including FS and SHR.
+
+`src/dataloader.py`
+
+: Loads the official StereoSet intersentence and intrasentence examples for benchmark evaluation.
 
 `src/stereoset_test.py`
 
@@ -266,11 +279,14 @@ Create the conda environment:
 conda env create -f environment.yml
 ```
 
-The environment includes PyTorch, Transformers, PEFT, TRL, pandas, NumPy, datasets, and related dependencies.
+The environment includes PyTorch, Transformers, PEFT, TRL, pandas, NumPy, NLTK, datasets, R, ggplot2, dplyr, and related dependencies.
 
 ## Typical Usage
 
 The repository includes generated model outputs and metric tables as CSV files. The lightest way to check the released materials is to recompute metrics from an existing generated-output CSV and regenerate plots from the released metric CSVs.
+
+For the complete sequence from environment setup through training, generation,
+annotation, metric computation, and plotting, see `REPRODUCIBILITY.md`.
 
 ### 1. Recompute Metrics from Existing Outputs
 
@@ -279,13 +295,11 @@ Run `src/analyze_metrics.py` with one generated-output CSV and the matching axis
 ```bash
 python src/analyze_metrics.py \
   --input-csv data/Occupation/llama/occupation_lm_baseline_analyze.csv \
-  --female-lex data/Occupation/template_attribution/female_occupations.txt \
-  --male-lex data/Occupation/template_attribution/male_occupations.txt \
   --attribute-col occupation \
   --out-dir results/Metrics_results/Occupation/llama
 ```
 
-The script writes per-sample annotations and aggregate metric CSV files. The same command pattern can be used for the other axes by changing the input CSV, attribute lists, `--attribute-col`, and output directory.
+The released `*_analyze.csv` files already contain row-level lexicon tags and manual checks. The script reuses those tags, excludes rows marked `INVALID`, retains valid mixed-gender cases as `ANOMALOUS`, and writes the aggregate metric CSV with F/M mean rows. For raw, unannotated generations, also provide identity lexicons through `--female-lex` and `--male-lex`. The same command pattern can be used for the other axes by changing the input CSV, `--attribute-col`, and output directory.
 
 ### 2. Regenerate Plots
 
@@ -295,19 +309,59 @@ Use the R scripts in `src/Visualization/` to generate FS and SHR plots from metr
 Rscript src/Visualization/Vis_FS.R \
   results/Metrics_results/Occupation/llama/occupation_lm_baseline_metrics.csv \
   results/Metrics_results/Occupation/llama/occupation_lm_sft_metrics.csv \
-  results/Visualization/Occupation/llama/FS/llama_occ_SFT_FS.pdf \
-  "Occupation FS: Llama baseline vs SFT"
+  results/Visualization/Occupation/llama/FS/llama_occ_SFT_FS.pdf
 ```
 
 ```bash
 Rscript src/Visualization/Vis_SHR.R \
   results/Metrics_results/Occupation/llama/occupation_lm_baseline_metrics.csv \
   results/Metrics_results/Occupation/llama/occupation_lm_sft_metrics.csv \
-  results/Visualization/Occupation/llama/SHR/llama_occ_SFT_SHR.pdf \
-  "Occupation ln(SHR): Llama baseline vs SFT"
+  results/Visualization/Occupation/llama/SHR/llama_occ_SFT_SHR.pdf
 ```
 
-### 3. Optional Model-Based Reruns
+### 3. Train LoRA Adapters
+
+The SFT script accepts either PANDA source fields or the released
+`prompt/chosen/rejected` representation. If a separate evaluation file is not
+provided, it creates a deterministic 80/20 split using seed 42.
+
+```bash
+python src/train_sft_lora.py \
+  --model-family mistral7b \
+  --train-jsonl data/Training_Validation_data/Constructed_PANDA_DPO_train.jsonl \
+  --out-dir runs/sft_mistral7b
+```
+
+The corresponding Llama run uses `--model-family llama8b`. SFT uses two
+epochs, dropout 0.05, batch size 1, gradient accumulation 16, and maximum
+length 512. Its model-specific LoRA settings are rank 8/alpha 16 for Mistral
+and rank 8/alpha 32 for Llama.
+
+For DPO, the sampler fixes the source composition of every five-example batch
+to four PANDA-derived pairs and one BiasDPO pair:
+
+```bash
+python src/train_dpo_lora.py \
+  --model-family llama8b \
+  --panda-jsonl data/Training_Validation_data/Constructed_PANDA_DPO_train.jsonl \
+  --biasdpo-jsonl data/Training_Validation_data/Huggingface_ahmedallam_BiasDPO.jsonl \
+  --out-dir runs/dpo_llama8b
+```
+
+The model-specific DPO configuration uses four epochs, learning rate `5e-5`,
+beta `0.1`, rank 16, and alpha 64 for Mistral; Llama uses three total epochs,
+learning rate `1e-5`, beta `0.2`, rank 64, and alpha 256. Both use dropout
+0.05, batch size 5, gradient
+accumulation 16, maximum length 512, and maximum prompt length 256. All values
+can be overridden explicitly.
+
+Both scripts save LoRA adapters only. Base-model weights must be obtained under
+the original model licenses and are not distributed here.
+Llama model access requires acceptance of its upstream license and an
+authenticated Hugging Face account; use `--model-id` for an authorized local
+copy and `--local-files-only` when all required files are already cached.
+
+### 4. Optional Model-Based Reruns
 
 Full generation and StereoSet reruns require access to the relevant base or locally merged models, suitable hardware, and environment-specific model paths. The repository does not provide model weights.
 
@@ -317,7 +371,25 @@ Full generation and StereoSet reruns require access to the relevant base or loca
 python src/generate_story_all.py --help
 ```
 
-For StereoSet evaluation, `src/stereoset_test.py` and `src/evaluation.py` require the official StereoSet data-loading utility `dataloader.py`. This file is not included in the repository; obtain it from the original StereoSet evaluation code and place it on the Python path before running the evaluation scripts.
+Its defaults match the paper (`n=10`, `max_new_tokens=128`, `temperature=0.7`, `top_p=0.9`, and `repetition_penalty=1.1`). Pass `--debias-mode ins` for the instruction-based condition. The released INS generation appended the fixed instruction to each template; `--instruction-position prefix` is also available for controlled variants. Baseline generation uses the standard mode. An SFT or DPO adapter can be evaluated directly with `--adapter-dir`, while a previously merged checkpoint can be supplied with `--use-merged --merged-dir`.
+
+For example, the released Occupation INS condition can be regenerated with:
+
+```bash
+python src/generate_story_all.py \
+  --model-id meta-llama/Llama-3.1-8B-Instruct \
+  --templates data/Occupation/template_attribution/templates.txt \
+  --female-list data/Occupation/template_attribution/female_occupations.txt \
+  --male-list data/Occupation/template_attribution/male_occupations.txt \
+  --debias-mode ins \
+  --out-csv reproduced/occupation_llama_ins.csv
+```
+
+The same command supports Mistral by changing `--model-id`. No trained adapter
+is loaded for INS; it uses the base instruction-tuned model with the fixed
+debiasing instruction appended to each experimental template.
+
+For StereoSet evaluation, `src/stereoset_test.py` and `src/evaluation.py` import the included `src/dataloader.py` module. Run the scripts from the repository root so that `src/` is resolved consistently.
 
 ## Anonymity and Reproducibility Notes
 
@@ -330,9 +402,3 @@ This repository is intended for anonymous review and research replication. Befor
 - the repository URL, account name, and branch names do not identify the authors or institution.
 
 For a clean anonymous release, create a new repository from a sanitized working directory rather than reusing a repository with non-anonymous history.
-
-## License
-
-Original code in this repository is licensed under the Apache License 2.0.
-Third-party datasets remain subject to the licenses identified in
-`THIRD_PARTY_NOTICES.md` and the corresponding files under `licenses/`.

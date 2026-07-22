@@ -5,23 +5,24 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
-  - pytorch=2.3
-  - pytorch-cuda=12.1      
-  - torchvision=0.18
-  - torchaudio=2.3
-  - cudatoolkit               
+  - pytorch=2.3.1
+  - pytorch-cuda=12.1
+  - torchvision=0.18.1
+  - torchaudio=2.3.1
   - pandas
   - numpy
+  - nltk
   - datasets
-  - transformers=4.55
+  - transformers=4.55.0
   - peft=0.11
   - accelerate
   - xlsxwriter
   - scikit-learn
   - tqdm
+  - r-base=4.3
+  - r-dplyr
+  - r-ggplot2
   - pip
   - pip:
       - trl==0.21.0
-      - evaluate
       - sentencepiece
-      - bitsandbytes==0.44.1  
